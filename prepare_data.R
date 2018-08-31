@@ -1,34 +1,23 @@
 library(tidyverse)
-library(GADMTools)
 library(sf)
 library(googlesheets)
 library(rvest)
 library(rmapshaper)
 
-# download geospatial data
-india_wrapper <- gadm.loadCountries("IND", level = 1, basefile = "./") 
-# check your directory for a file "IND_adm1.rds" after running this command
+# read in geospatial data
+ind_sf <- st_read("india_states_2014/india_states.shp")
 
-india_state_boundaries <- readRDS('IND_adm1.rds')
+# mutate type variable to define union territories
+uts <- c("Delhi", "Andaman & Nicobar Islands", "Puducherry", 
+         "Lakshadweep", "Dadra & Nagar Haveli", "Daman & Diu",
+         "Chandigarh")
 
-# convert SpatialPolygonsDataFrame to sf object
-ind_sf <- st_as_sf(india_state_boundaries)
-
-# correct GADM errors; retain necessary variables
 ind_sf <- ind_sf %>% 
-    select(NAME_1, ENGTYPE_1, HASC_1, geometry) %>% 
+    select(name, abbr) %>% 
     mutate(
-        NAME_1 = replace(NAME_1, NAME_1 == 'NCT of Delhi', 'Delhi'),
-        NAME_1 = replace(NAME_1, NAME_1 == 'Andaman and Nicobar', 
-                         'Andaman and Nicobar Islands'),
-        ENGTYPE_1 = replace(ENGTYPE_1, NAME_1 == "Himachal Pradesh", "State"),
-        HASC_1 = word(HASC_1, start = -1, sep = "\\.")
+        type = ifelse(name %in% uts, "Union Territory", "State")
     ) %>% 
-    rename(
-        state_ut = NAME_1,
-        type = ENGTYPE_1,
-        abb = HASC_1
-    )
+    rename(abb = abbr, state_ut = name)
 
 # paste data from Wikipedia into a google sheet
 # population data: https://en.wikipedia.org/wiki/List_of_states_and_union_territories_of_India_by_population
@@ -109,7 +98,20 @@ tidy_region <- data.frame(regions_mat) %>%
 # join attribute data together
 attributes_df <- tidy_gdp %>% 
     left_join(tidy_pop) %>% 
-    left_join(tidy_region)
+    left_join(tidy_region) %>% 
+    mutate(
+        state_ut = replace(state_ut, state_ut == "Andaman and Nicobar Islands", 
+                           "Andaman & Nicobar Islands"),
+        state_ut = replace(state_ut, state_ut == "Daman and Diu", 
+                           "Daman & Diu"),
+        state_ut = replace(state_ut, state_ut == "Dadra and Nagar Haveli", 
+                           "Dadra & Nagar Haveli"),
+        state_ut = replace(state_ut, state_ut == "Jammu and Kashmir", 
+                           "Jammu & Kashmir")
+    )
+
+# output attributes file
+saveRDS(attributes_df, "attributes.rds")
 
 # join attribute data to sf object
 ind_sf <- ind_sf %>% 
@@ -122,5 +124,5 @@ ind_sf <- ind_sf %>%
 # simplify geometry
 simp_sf <- ms_simplify(ind_sf, keep = 0.01, keep_shapes = TRUE)
 
-# output file to shiny app directory
-saveRDS(simp_sf, "shiny_app/simp_sf.rds")
+# output file
+saveRDS(simp_sf, "simp_sf.rds")
